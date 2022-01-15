@@ -1,0 +1,62 @@
+CREATE DATABASE homework2;
+
+\c homework2
+
+CREATE SEQUENCE seq_seller_id
+INCREMENT 1
+START 0
+MINVALUE 0;
+
+ALTER SEQUENCE seq_seller_id OWNER TO postgres;
+
+CREATE TABLE sellers (
+	seller_id INTEGER NOT NULL DEFAULT nextval('seq_seller_id'::regclass),
+	name VARCHAR (20) NOT NULL,
+	phone VARCHAR (20) NOT NULL,
+	local VARCHAR (20) NOT NULL,
+	domain VARCHAR (20) NOT NULL,
+	passwd VARCHAR (20) NOT NULL,
+
+	PRIMARY KEY (seller_id)
+);
+
+COPY sellers (name, phone, local, domain, passwd)
+FROM '/home/example_db/sellers.csv'
+DELIMITER ','
+CSV HEADER;
+
+CREATE SEQUENCE seq_store_id
+INCREMENT 1
+START 0
+MINVALUE 0;
+
+ALTER SEQUENCE seq_store_id OWNER TO postgres;
+
+CREATE TABLE stores (
+	store_id INTEGER NOT NULL DEFAULT nextval('seq_store_id'::regclass),
+	address VARCHAR (100) NOT NULL,
+	sname VARCHAR (40) NOT NULL,
+	latitude FLOAT,
+	longitude FLOAT,
+	phone_nums VARCHAR (50) NOT NULL,
+	seller_id INTEGER,
+	
+	PRIMARY KEY (store_id),
+	CONSTRAINT fk_seller FOREIGN KEY (seller_id) REFERENCES sellers(seller_id) ON DELETE CASCADE
+);
+
+COPY stores (address, sname, latitude, longitude, phone_nums, seller_id)
+FROM '/home/example_db/stores.csv'
+DELIMITER ','
+CSV HEADER;
+
+CREATE TABLE menus (
+	menu VARCHAR (20) NOT NULL,
+	store_id INTEGER NOT NULL,
+	CONSTRAINT fk_store FOREIGN KEY (store_id) REFERENCES stores(store_id) ON DELETE CASCADE
+);
+
+COPY menus (menu, store_id)
+FROM '/home/example_db/menus.csv'
+DELIMITER ','
+CSV HEADER;
