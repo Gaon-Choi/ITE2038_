@@ -1,7 +1,8 @@
 import time
 import argparse
-import geopy
 from helpers.connection import conn
+import tabulate as tb
+tb.WIDE_CHARS_MODE = True
 
 
 def parsing_store(parser:argparse.ArgumentParser):
@@ -29,7 +30,6 @@ def parsing_store(parser:argparse.ArgumentParser):
     parser_update_order = sub_parsers.add_parser('update_order')
     parser_update_order.add_argument('id', type=int)
     parser_update_order.add_argument('order_idx', type=int)
-    parser_update_order.add_argument('status', type=int, choices=[0, 1, 2])
 
     # stat
     parser_stat = sub_parsers.add_parser('stat')
@@ -41,21 +41,25 @@ def parsing_store(parser:argparse.ArgumentParser):
     parser_search = sub_parsers.add_parser('search')
     parser_search.add_argument('id', type=int)
 
+
 def int_check(text):
     try: int(text); return True
     except ValueError: return False
+
 
 def string_check(text):
     if text[0] == "\'" and text[-1] == "\'":
         return True
     else: return False
 
+
 def time_form(time_text):
-    return time_text[:2] + ":" + time_text[:-2]
+    return time_text[:2] + ":" + time_text[2:4]
+
 
 def show_store_from_table(row):
-    print("Name: {id}".format(id = row[2])) # sname
-    print("Location: lat {lat} | lng {lng}".format(lat = row[3], lng = row[4]))    # lat, lng
+    print("Name: {id}".format(id = row[2]))
+    print("Location: lat {lat} | lng {lng}".format(lat = row[3], lng = row[4]))
     print("Address: {addr}".format(addr = row[1]))
     print("Phone Number: {phone}".format(phone = row[5]))
     print("Schedules: ")
@@ -86,18 +90,11 @@ def show_menu_info_store(args):
     # TODO
     try:
         cur = conn.cursor()
-        sql = "SELECT * FROM menu WHERE sid=%(id)s;"
+        sql = "SELECT id, menu FROM menu WHERE sid=%(id)s;"
         cur.execute(sql, {"id": args.id})
         rows = cur.fetchall()
-        if rows:
-            print("Menu of store {id}".format(id=args.id))
-            print("---------------------------------------------")
-        else: print("NOOOOOO~")
-
-        idx = 1
-        for row in rows:
-            print("{index}. Menu ID: {id}, Name: {name}".format(index=idx, id=row[0], name=row[1])); idx+=1
-        print("---------------------------------------------")
+        print("Menu of Store {sid}".format(sid=args.id))
+        print(tb.tabulate(rows, headers=['Menu ID', 'Name']))
     except Exception as err:
         print(err)
 
@@ -107,99 +104,144 @@ def add_menu_into_store(args):
     try:
         cur = conn.cursor()
         sql = "INSERT INTO menu (menu, sid) " \
-              "VALUES ({menu}, {sid})".format(menu=args.menu, sid=args.id)
+              "VALUES (\'{menu}\', {sid})".format(menu=args.menu, sid=args.id)
         print(sql)
         cur.execute(sql)
+        conn.commit()
     except Exception as err:
         print(err)
+        conn.rollback()
     else:
-        conn.commit()
         print("adding menu success!")
 
-'''
+
+def show_order_info_store(args):
     # TODO
     try:
         cur = conn.cursor()
-        sql = ""
-        print(sql)
+        sql=str()
+        if args.status is None:
+            sql = "SELECT id, cid, otime, status FROM orders WHERE sid={sid};".format(sid=args.id)
+            print("ALL orders for Store {sid}".format(sid=args.id))
+            cur.execute(sql)
+            rows = cur.fetchall()
+            print(tb.tabulate(rows, headers=['Order ID', 'Customer ID', 'OTime', 'Status']))
+            return
+        elif args.status == '0' or args.status == 'pending':
+            sql = "SELECT id, cid, otime FROM orders WHERE sid={sid} and status=\'pending\';".format(sid=args.id)
+            print("Pending orders for Store {sid}".format(sid=args.id))
+        elif args.status == '1' or args.status == 'delivering':
+            sql = "SELECT id, cid, otime FROM orders WHERE sid={sid} and status=\'delivering\';".format(sid=args.id)
+            print("Delivering orders for Store {sid}".format(sid=args.id))
+        else:
+            sql = "SELECT id, cid, otime FROM orders WHERE sid={sid} and status=\'delivered\';".format(sid=args.id)
+            print("Delivered orders for Store {sid}".format(sid=args.id))
         cur.execute(sql)
+        rows = cur.fetchall()
+        print(tb.tabulate(rows, headers=['Order ID', 'Customer ID', 'OTime']))
+
     except Exception as err:
         print(err)
-    else:
-        conn.commit()
-'''
 
-def show_all_order_store(args):
-    # TODO
-    try:
-        cur = conn.cursor()
-        sql = ""
-        print(sql)
-        cur.execute(sql)
-    except Exception as err:
-        print(err)
-
-    print("show_all_order_store")
-
-
-def show_delivering_store(args):
-    # TODO
-    try:
-        cur = conn.cursor()
-        sql = ""
-        print(sql)
-        cur.execute(sql)
-    except Exception as err:
-        print(err)
-    else:
-        conn.commit()
-
-    print("show_delivering_store")
+    print("show_order_info_store")
 
 
 def update_order_store(args):
     # TODO
     try:
         cur = conn.cursor()
-        sql = ""
-        print(sql)
-        cur.execute(sql)
-    except Exception as err:
-        print(err)
-    else:
+        # check validity of order-store relationship
+        sql0 = "SELECT sid FROM orders WHERE id={oid}".format(oid=args.order_idx)
+        cur.execute(sql0); tmp_id = cur.fetchone()
+        if tmp_id is None:
+            print("Given order ID is invalid!")
+            return
+        if tmp_id[0] != args.id:
+            print("Given order #{oid} is not accessible from Store #{sid}".format(oid=args.order_idx, sid=args.id))
+            return
+
+        # fetch customer's location info
+        sql1 = "SELECT lat, lng " \
+               "FROM store WHERE id = {sid};".format(sid=args.id)
+        cur.execute(sql1)
+        info_ = cur.fetchone()
+        latitude, longitude = info_[0], info_[1]
+
+        # get the closest deliver from the given store
+        sql2 = "SELECT d.id " \
+              "FROM delivery d " \
+              "WHERE d.stock <= 4 " \
+              "ORDER BY power(({lat}-d.lat), 2) + power(({lng}-d.lng), 2) " \
+              "LIMIT 1;".format(lat=latitude, lng=longitude)
+        cur.execute(sql2)
+        delivery_id = (cur.fetchone())[0]   # delivery id
+        print("Closest deliver is found: Deliver #{did}".format(did=delivery_id))
+
+        # update order record, status: pending->delivering
+        sql3 = "UPDATE orders SET did = {did}, status = \'delivering\' " \
+               "WHERE id={order_id}".format(did=delivery_id, order_id=args.order_idx)
+        cur.execute(sql3)
         conn.commit()
 
-    print("update_order_store")
+        # increment stock of corresponding deliver
+        sql4 = "UPDATE delivery SET stock = stock + 1 WHERE id={did}".format(did=delivery_id)
+        cur.execute(sql4)
+        conn.commit()
+
+    except Exception as err:
+        print(err)
+        conn.rollback()
+    else:
+        print("update_order_store")
 
 
 def stat_info_store(args):
     # TODO
     try:
         cur = conn.cursor()
-        sql = ""
-        print(sql)
+        y, m, d = (args.start_date).split('/')
+        sql = "SELECT otime::date as Date, COUNT(*) as Orders " \
+              "FROM orders " \
+              "WHERE sid={sid} and otime::date >= \'{year}/{month}/{day}\'::date and otime::date < \'{year}/{month}/{day}\'::date + interval \'{interval} day\' " \
+              "GROUP BY otime::date;".format(sid=args.id, year=y, month=m, day=d, interval=args.days)
+
         cur.execute(sql)
+        rows = cur.fetchall()
+        print("STAT info of Store {sid}".format(sid=args.id))
+        print(tb.tabulate(rows, headers=['Date', 'Orders']))
     except Exception as err:
         print(err)
-    else:
-        conn.commit()
-
-    print("stat_info_store")
 
 
 def search_info_store(args):
     # TODO
     try:
         cur = conn.cursor()
-        sql = ""
-        print(sql)
+        sql = \
+            "SELECT DISTINCT cid, name " \
+            "FROM ( " \
+            "SELECT * FROM " \
+            "( " \
+            "SELECT DISTINCT cid, menu_id FROM cart WHERE menu_id IN (SELECT id FROM menu WHERE sid={sid}) " \
+            ")sx " \
+            "WHERE NOT EXISTS ( " \
+            "(SELECT p.id FROM (SELECT id FROM menu WHERE sid={sid})p) " \
+            "EXCEPT " \
+            "(SELECT sp.menu_id FROM ( " \
+            "SELECT DISTINCT cid, menu_id FROM cart WHERE menu_id IN (SELECT id FROM menu WHERE sid={sid}) " \
+            ")sp " \
+            "WHERE sp.cid = sx.cid " \
+            ") " \
+            ") " \
+            ")end_query, customer " \
+            "WHERE customer.id = end_query.cid".format(sid=args.id)
         cur.execute(sql)
+        vip_customer = cur.fetchall()
+        print("VIP LIST of STORE {sid}".format(sid=args.id))
+        print(tb.tabulate(vip_customer, headers=['Customer ID', 'Customer Name']))
+
     except Exception as err:
         print(err)
-    else:
-        conn.commit()
-
-    print("search_info_store")
 
 
 if __name__ == "__main__":
@@ -218,10 +260,7 @@ if __name__ == "__main__":
         add_menu_into_store(args)
 
     elif (args.function == 'order'):
-        if args.status is None:
-            show_all_order_store(args)
-        else:
-            show_delivering_store(args)
+        show_order_info_store(args)
 
     elif (args.function == 'update_order'):
         update_order_store(args)
@@ -235,6 +274,5 @@ if __name__ == "__main__":
     else:
         parser.print_help()
 
-    print(args)
     print("Running Time: ", end="")
     print(time.time() - start)

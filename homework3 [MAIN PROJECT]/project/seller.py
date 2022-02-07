@@ -35,14 +35,17 @@ def show_seller_info(args):
         sql = "SELECT * FROM seller WHERE id={id};".format(id=args.id)
         cur.execute(sql)
         rows = cur.fetchall()
+        if not rows:
+            print("Given seller ID doesn't exist.")
+            return
         for row in rows:
             show_seller_from_table(row)
+
     except Exception as err:
         print(err)
 
 
 def modify_seller_info(args):
-
     # TODO
     try:
         cur = conn.cursor()
@@ -51,13 +54,12 @@ def modify_seller_info(args):
               "WHERE seller.id={id}".format(attr=args.attr, data=args.data, id=int(args.id))
         print(sql)
         cur.execute(sql)
+        conn.commit()
 
     except Exception as err:
         print(err)
-
-    else:
-        conn.commit()
-        print("modification success!")
+        conn.rollback()
+    print("modify_seller_info")
 
 
 if __name__ == "__main__":
